@@ -7,25 +7,19 @@ library(diceR)
 library(effectsize)
 library(ggplot2)
 library(ggthemes)
+library(gplots)
 library(mclust)
 library(mice)
+library(patchwork)
+library(pheatmap)
 library(psych)
 library(tidyr)
 library(xlsx)
-library(gplots)
 
 
 #### FIBROMYALGIA DATA LOADING & SCORING ####
 
-d1 <- read.xlsx("Data/Parte1.xlsx", 1)
-d3 <- read.xlsx("Data/Parte2.xlsx", 1)
-
-# matching participants between the two administration sessions
-d1[,3] <- gsub(" ", "", tolower(d1[,3]))
-d3[,3] <- gsub(" ", "", tolower(d3[,3]))
-d <- merge(d1, d3, by.x=colnames(d1)[3], by.y=colnames(d3)[3])
-
-rm(d1, d3)
+d <- read.xlsx("Data/Data_Fibro.xlsx", 1)
 
 # Selecting only women
 d <- d[!is.na(d$Sesso) & d$Sesso == 0,]
@@ -35,7 +29,7 @@ d[,5] <- 2021-as.numeric(d[,5])
 colnames(d)[5] <- "Age"
 
 # Attributing colnames
-colnames(d)[7:15] <- c("TitoloStudio", "Occupazione", "Professione", "Medici_anno", "Anni_diagnosi", "Psicoterapeuta_Disorder", 
+colnames(d)[8:16] <- c("TitoloStudio", "Occupazione", "Professione", "Medici_anno", "Anni_diagnosi", "Psicoterapeuta_Disorder", 
                                  "Psicoterapeuta_Generico", "Farmaci_Binario", "Farmaci_Numero")
 
 # TAQ #
@@ -256,9 +250,14 @@ summary_data$variable <- factor(summary_data$variable, levels = rev(c(
     "DPES_Compass", "DPES_Amus", "DPES_Awe"
 )))
 
+# Ensure long_data has the same factor levels as summary_data
+long_data <- long_data %>%
+    mutate(variable = factor(variable, levels = levels(summary_data$variable)))
+
 cbPalette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
-ggplot(summary_data, aes(x = variable, y = mean, color = Disorder, group = Disorder)) +
+# Line plot of means with confidence intervals
+p1 <- ggplot(summary_data, aes(x = variable, y = mean, color = Disorder, group = Disorder)) +
     geom_line(size = 1.2) +  
     geom_point(size = 3, shape = 21, fill = "white") +  
     geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, size = 0.8) +  
@@ -272,14 +271,13 @@ ggplot(summary_data, aes(x = variable, y = mean, color = Disorder, group = Disor
         axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
         axis.title.x = element_text(margin = margin(t = 10)),  
         plot.title = element_text(hjust = 0.5, face = "bold"),  
-        legend.position = "right",  
-        legend.title = element_blank(),  
-        panel.grid.minor = element_blank(),  
-        panel.grid.major.x = element_blank()  
+        legend.position = "none",           # Remove legend here
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()
     ) +
     ylim(c(0, 1)) +
     coord_flip() +
-    scale_color_manual(values = cbPalette) +  # Apply colorblind-friendly palette
+    scale_color_manual(values = cbPalette) +
     scale_x_discrete(labels = c(
         TAQ_Partner = "TAQ Partner",
         TAQ_Family = "TAQ Family",
@@ -304,6 +302,34 @@ ggplot(summary_data, aes(x = variable, y = mean, color = Disorder, group = Disor
         DPES_Awe = "DPES Awe"
     ))
 
+# Boxplots of scores
+p2 <- ggplot(long_data, aes(x = variable, y = value, fill = Disorder)) +
+    geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+    theme_minimal(base_size = 14, base_family = "Arial") +
+    labs(
+        title = "Distribution by Variable and Group",
+        x = "Variables",
+        y = NULL  # Remove y-axis label
+    ) +
+    coord_flip() +
+    scale_fill_manual(values = cbPalette) +
+    theme(
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 10)),
+        axis.title.y = element_blank(),  # Remove y-axis title
+        axis.text.y = element_blank(),   # Remove y-axis labels
+        axis.ticks.y = element_blank(),  # Remove y-axis ticks
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "right",
+        legend.title = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()
+    )
+
+# Combine the plots side by side
+combined_plot <- p1 + p2 + plot_layout(ncol = 2)
+combined_plot
+
 #### CONTROLLING FOR AGE ####
 data_Agecorrected <- complete(mice(data), 1)
 
@@ -324,7 +350,7 @@ cortest.jennrich(corf,
                  sum(data$Disorder == "Fibromyalgia"), 
                  sum(data$Disorder == "Chronic Pain"))
 
-# HEATMAP OF COMPARISON
+# HEATMAP OF COMPARISONS
 
 #Rounding correlations
 corf <- corf %>% round(2)
@@ -446,7 +472,7 @@ set.seed(108)
 
 CC_diceR <- dice(data_Agecorrected,
                  nk = 2, # 2 clusters
-                 reps = 10, # 250 BCs
+                 reps = 250, # 250 BCs
                  p.item=0.8, # % of subsamples
                  # algorithms = c("diana", "ap", "block", "som", "cmeans", "km", "pam", "hc", "hdbscan", "gmm", "nmf", "sc"), 
                  algorithms = c("km", "pam", "hc", "hdbscan", "gmm", "nmf", "sc"), 
@@ -457,7 +483,7 @@ CC_diceR <- dice(data_Agecorrected,
                  plot=TRUE, # plot consensus matrix,
                  seed= 108, 
                  reweigh=TRUE,
-                 prep.data="sampled"
+                 prep.data="none"
                  
 )
 
@@ -480,3 +506,28 @@ graph_delta_area(CC_diceR$E) +
     theme_few() + 
     facet_grid( ~ Method,labeller = as_labeller(labels)) 
 
+# Consensus matrix graph with disorder beside the graph
+consensus_mat <- consensus_matrix(CC_diceR$E[,,"PAM_Euclidean",])
+colnames(consensus_mat) <- paste0("C",1:ncol(consensus_mat))
+
+annotations <- data.frame(Disorder = data$Disorder)
+rownames(annotations) <- colnames(consensus_mat)
+
+annotations_colors <- list(
+    Disorder = c(
+        "Fibromyalgia" = "#E18D96", 
+        "Chronic Pain" = "#F2C57C"
+    )
+)
+
+pheatmap(consensus_mat,
+         legend=T,
+         color = colorRampPalette(c("white", "#6A9FB5"))(100),
+         annotation_col= annotations,
+         annotation_colors = annotations_colors,
+         treeheight_row = 0,
+         treeheight_col = 0,
+         border_color = NA,
+         show_colnames = F,
+         main = "Consensus matrix"
+)
